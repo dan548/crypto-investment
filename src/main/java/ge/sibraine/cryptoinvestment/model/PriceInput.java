@@ -3,13 +3,11 @@ package ge.sibraine.cryptoinvestment.model;
 
 import com.opencsv.bean.CsvBindByName;
 import com.opencsv.bean.CsvNumber;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.Data;
 
 
-@Getter
-@Setter
-public class Price {
+@Data
+public class PriceInput {
 
     @CsvBindByName(column = "timestamp")
     @CsvNumber("###.##")
@@ -19,7 +17,7 @@ public class Price {
     private String symbol;
 
     @CsvBindByName
-    private double price;
+    private String price;
 
     @Override
     public String toString() {

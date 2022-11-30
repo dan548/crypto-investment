@@ -2,10 +2,13 @@ package ge.sibraine.cryptoinvestment.service;
 
 import com.opencsv.bean.CsvToBeanBuilder;
 import ge.sibraine.cryptoinvestment.exception.NoSuchCryptoNameException;
+import ge.sibraine.cryptoinvestment.mapper.PriceMapper;
 import ge.sibraine.cryptoinvestment.model.Crypto;
-import ge.sibraine.cryptoinvestment.model.Price;
+import ge.sibraine.cryptoinvestment.model.PriceInput;
+import ge.sibraine.cryptoinvestment.model.PriceStamp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
@@ -15,6 +18,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -27,12 +31,15 @@ public class CryptoService {
 
     public final static Logger logger = LoggerFactory.getLogger(CryptoService.class);
 
+    @Autowired
+    private PriceMapper priceMapper;
+
     @Value("classpath:prices/*")
     private Resource[] resources;
 
     public static final Pattern pricePattern = Pattern.compile("(.+)_values.csv");
 
-    private Crypto calculateBaseIndicators(List<Price> prices, String name) {
+    private Crypto calculateBaseIndicators(List<PriceStamp> prices, String name) {
         Crypto crypto = null;
 
         if (prices != null && !prices.isEmpty()) {
@@ -42,33 +49,36 @@ public class CryptoService {
 
             crypto.setMin(
                     prices.stream()
-                            .min(Comparator.comparingDouble(Price::getPrice))
-                            .map(Price::getPrice)
+                            .min(Comparator.comparing(PriceStamp::getPrice))
+                            .map(PriceStamp::getPrice)
                             .orElse(null)
             );
 
             crypto.setMax(
                     prices.stream()
-                            .max(Comparator.comparingDouble(Price::getPrice))
-                            .map(Price::getPrice)
+                            .max(Comparator.comparing(PriceStamp::getPrice))
+                            .map(PriceStamp::getPrice)
                             .orElse(null)
             );
 
             crypto.setOldest(
                     prices.stream()
-                            .min(Comparator.comparingLong(Price::getTimeMillis))
-                            .map(Price::getPrice)
+                            .min(Comparator.comparingLong(PriceStamp::getTimeMillis))
+                            .map(PriceStamp::getPrice)
                             .orElse(null)
             );
 
             crypto.setNewest(
                     prices.stream()
-                            .max(Comparator.comparingLong(Price::getTimeMillis))
-                            .map(Price::getPrice)
+                            .max(Comparator.comparingLong(PriceStamp::getTimeMillis))
+                            .map(PriceStamp::getPrice)
                             .orElse(null)
             );
 
-            crypto.setNormalizedRange((crypto.getMax() - crypto.getMin()) / crypto.getMin());
+            crypto.setNormalizedRange(
+                    crypto.getMax().subtract(crypto.getMin()).divide(crypto.getMin(), 10, RoundingMode.HALF_DOWN)
+                            .doubleValue()
+            );
         }
 
         return crypto;
@@ -83,7 +93,7 @@ public class CryptoService {
     }
 
     public Crypto cryptoBaseIndicators(String name) throws NoSuchCryptoNameException {
-        List<Price> priceList = getPrices(name);
+        List<PriceStamp> priceList = getPrices(name);
         return calculateBaseIndicators(priceList, name);
     }
 
@@ -102,16 +112,19 @@ public class CryptoService {
                 .orElse(null);
     }
 
-    public List<Price> getPrices(String prefixSymbol) throws NoSuchCryptoNameException {
+    public List<PriceStamp> getPrices(String prefixSymbol) throws NoSuchCryptoNameException {
         InputStream resourceStream = null;
         try {
             resourceStream = new ClassPathResource(
                     String.format("prices/%s_values.csv", prefixSymbol.toUpperCase())).getInputStream();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(resourceStream))) {
-                return new CsvToBeanBuilder<Price>(reader)
-                        .withType(Price.class)
+                return new CsvToBeanBuilder<PriceInput>(reader)
+                        .withType(PriceInput.class)
                         .build()
-                        .parse();
+                        .parse()
+                        .stream()
+                        .map(priceMapper::inputToStamp)
+                        .collect(Collectors.toList());
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -120,24 +133,26 @@ public class CryptoService {
         }
     }
 
-    public Map<String, List<Price>> getAllPrices() {
+    public Map<String, List<PriceStamp>> getAllPrices() {
         return Arrays.stream(resources)
                 .filter(resource -> resource.getFilename() != null && resource.getFilename().matches(".+_values.csv"))
                 .collect(Collectors.toMap(
                         res -> {
                             Matcher m = pricePattern.matcher(res.getFilename());
                             return m.find() ? m.group(1) : res.getFilename();
-                        }, this::getPrices
+                        }, res -> getPrices(res).stream()
+                                .map(inputPrice -> priceMapper.inputToStamp(inputPrice))
+                                .collect(Collectors.toList())
                 ));
     }
 
-    private List<Price> getPrices(Resource res) {
+    private List<PriceInput> getPrices(Resource res) {
         InputStream resourceStream = null;
         try {
             resourceStream = res.getInputStream();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(resourceStream))) {
-                return new CsvToBeanBuilder<Price>(reader)
-                        .withType(Price.class)
+                return new CsvToBeanBuilder<PriceInput>(reader)
+                        .withType(PriceInput.class)
                         .build()
                         .parse();
             } catch (IOException e) {
