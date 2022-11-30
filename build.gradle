@@ -5,6 +5,10 @@ plugins {
 	id "io.freefair.lombok" version "6.5.1"
 }
 
+bootRun {
+	main = 'ge.sibraine.cryptoinvestment.CryptoInvestmentApplication'
+}
+
 group = 'ge.sibraine'
 version = '0.0.1-SNAPSHOT'
 sourceCompatibility = '17'
